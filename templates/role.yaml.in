@@ -1,1 +1,1 @@
-{{.OCS.RoleString}}
+{{index .OCS.Roles "ocs-operator"}}

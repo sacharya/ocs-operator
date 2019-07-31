@@ -19,17 +19,20 @@ import (
 )
 
 type operatorData struct {
-	Deployment        string
-	DeploymentSpec    string
-	RoleString        string
-	Rules             string
-	ClusterRoleString string
-	ClusterRules      string
-	OperatorTag       string
-	ComponentTag      string
-	CRDs			  map[string]*extv1beta1.CustomResourceDefinition
-	CRDStrings		  map[string]string
-	CRStrings         map[string]string
+	Deployment         string
+	DeploymentSpec     string
+	OperatorTag        string
+	ComponentTag       string
+
+	// Operator can have multiple CRDS, Roles and ClusterRoles.
+	// Store as key-values: objectMeta.Name=>value.
+	Roles              map[string]string
+	RoleRules          map[string]string
+	ClusterRoles       map[string]string
+	ClusterRoleRules   map[string]string
+	CRDs               map[string]*extv1beta1.CustomResourceDefinition
+	CRDStrings         map[string]string
+	CRStrings          map[string]string
 }
 
 type templateData struct {
@@ -161,14 +164,17 @@ func getOCS(data *templateData) {
 	marshallObject(cr, &writer)
 	crString := writer.String()
 
+	data.OCS.Roles = make(map[string]string)
+	data.OCS.RoleRules = make(map[string]string)
+
 	data.OCS.CRDs = make(map[string]*extv1beta1.CustomResourceDefinition)
 	data.OCS.CRDStrings = make(map[string]string)
 	data.OCS.CRStrings = make(map[string]string)
 
 	data.OCS.Deployment = deployment
 	data.OCS.DeploymentSpec = deploymentSpec
-	data.OCS.RoleString = roleString
-	data.OCS.Rules = rules
+	data.OCS.Roles[role.ObjectMeta.Name] = roleString
+	data.OCS.RoleRules[role.ObjectMeta.Name] = rules
 	data.OCS.CRDs[crd.ObjectMeta.Name] = crd
 	data.OCS.CRDStrings[crd.ObjectMeta.Name] = crdString
 	data.OCS.CRStrings[cr.ObjectMeta.Name] = crString
@@ -193,25 +199,54 @@ func getRCO(data *templateData) {
 	check(err)
 	deploymentSpec := fixResourceString(writer.String(), 12)
 
-	// Get RCO Role
-	writer = strings.Builder{}
-	role := ocscomponents.GetRole()
-	marshallObject(role, &writer)
-	roleString := writer.String()
+	data.RCO.Roles = make(map[string]string)
+	data.RCO.RoleRules = make(map[string]string)
 
-	// Get the Rules out of RCO ClusterRole
-	writer = strings.Builder{}
-	ocsrules := role.Rules
-	for _, rule := range ocsrules {
-		err := marshallObject(rule, &writer)
-		check(err)
+	// Get RCO Roles
+	roles := ocscomponents.GetRookCephRoles()
+	for _, role := range roles {
+		writer = strings.Builder{}
+		marshallObject(role, &writer)
+		roleString := writer.String()
+		data.RCO.Roles[role.ObjectMeta.Name] = roleString
+
+		// Get the Rules out of RCO ClusterRole
+		writer = strings.Builder{}
+		ocsrules := role.Rules
+		for _, rule := range ocsrules {
+			err := marshallObject(rule, &writer)
+			check(err)
+		}
+		rules := fixResourceString(writer.String(), 14)
+		data.RCO.RoleRules[role.ObjectMeta.Name] = rules
 	}
-	rules := fixResourceString(writer.String(), 14)
+
+	data.RCO.ClusterRoles = make(map[string]string)
+	data.RCO.ClusterRoleRules = make(map[string]string)
+
+	// Get RCO ClusterRoles
+	clusterRoles := ocscomponents.GetRookCephClusterRoles()
+	for _, role := range clusterRoles {
+		writer = strings.Builder{}
+		marshallObject(role, &writer)
+		roleString := writer.String()
+		data.RCO.ClusterRoles[role.ObjectMeta.Name] = roleString
+
+		// Get the Rules out of RCO ClusterRole
+		writer = strings.Builder{}
+		ocsrules := role.Rules
+		for _, rule := range ocsrules {
+			err := marshallObject(rule, &writer)
+			check(err)
+		}
+		rules := fixResourceString(writer.String(), 14)
+		data.RCO.ClusterRoleRules[role.ObjectMeta.Name] = rules
+	}
 
 	data.RCO.CRDs = make(map[string]*extv1beta1.CustomResourceDefinition)
 	data.RCO.CRDStrings = make(map[string]string)
 
-	// Get RCO CRD
+	// Get RCO CRDs
 	crds := ocscomponents.GetRookCephCRDs()
 	for _, crd := range crds {
 		writer = strings.Builder{}
@@ -224,8 +259,6 @@ func getRCO(data *templateData) {
 
 	data.RCO.Deployment = deployment
 	data.RCO.DeploymentSpec = deploymentSpec
-	data.RCO.RoleString = roleString
-	data.RCO.Rules = rules
 }
 
 func main() {

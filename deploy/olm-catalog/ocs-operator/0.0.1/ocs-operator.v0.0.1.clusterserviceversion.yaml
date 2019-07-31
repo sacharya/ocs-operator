@@ -14,6 +14,96 @@ metadata:
               "spec": {
                   "manageNodes": false
               }
+          },
+          {
+              "apiVersion": "ceph.rook.io/v1",
+              "kind": "CephCluster",
+              "metadata": {
+                  "name": "my-rook-ceph",
+                  "namespace": "my-rook-ceph"
+              },
+              "spec": {
+                  "cephVersion": {
+                      "image": "ceph/ceph:v14.2.1-20190430"
+                  },
+                  "dataDirHostPath": "/var/lib/rook",
+                  "mon": {
+                      "count": 3
+                  },
+                  "dashboard": {
+                      "enabled": true
+                  },
+                  "network": {
+                      "hostNetwork": false
+                  },
+                  "rbdMirroring": {
+                      "workers": 0
+                  },
+                  "storage": {
+                      "useAllNodes": true,
+                      "useAllDevices": true
+                  }
+              }
+          },
+          {
+              "apiVersion": "ceph.rook.io/v1",
+              "kind": "CephBlockPool",
+              "metadata": {
+                  "name": "replicapool",
+                  "namespace": "my-rook-ceph"
+              },
+              "spec": {
+                  "failureDomain": "host",
+                  "replicated": {
+                      "size": 3
+                  },
+                  "annotations": null
+              }
+          },
+          {
+              "apiVersion": "ceph.rook.io/v1",
+              "kind": "CephObjectStore",
+              "metadata": {
+                  "name": "my-store",
+                  "namespace": "my-rook-ceph"
+              },
+              "spec": {
+                  "metadataPool": {
+                      "failureDomain": "host",
+                      "replicated": {
+                          "size": 3
+                      }
+                  },
+                  "dataPool": {
+                      "failureDomain": "host",
+                      "replicated": {
+                          "size": 3
+                      }
+                  },
+                  "gateway": {
+                      "type": "s3",
+                      "sslCertificateRef": null,
+                      "port": 8080,
+                      "securePort": null,
+                      "instances": 1,
+                      "allNodes": false,
+                      "placement": null,
+                      "annotations": null,
+                      "resources": null
+                  }
+              }
+          },
+          {
+              "apiVersion": "ceph.rook.io/v1",
+              "kind": "CephObjectStoreUser",
+              "metadata": {
+                  "name": "my-user",
+                  "namespace": "my-rook-ceph"
+              },
+              "spec": {
+                  "store": "my-store",
+                  "displayName": "my display name"
+              }
           }
       ]
     capabilities: Basic Install
@@ -28,15 +118,30 @@ spec:
       version: v1alpha1
       displayName: Storage Cluster
       description: Storage Cluster represents a Rook Ceph storage cluster including all the storage and compute resources required.
-    required:
-    - kind: CephCluster
+    - description: Represents a Ceph cluster.
+      displayName: Ceph Cluster
+      kind: CephCluster
       name: cephclusters.ceph.rook.io
       version: v1
-      displayName: Ceph Cluster
-      description: Represents a Ceph cluster.
+
+    - description: Represents a Ceph Block Pool.
+      displayName: Ceph Block Pool
+      kind: CephBlockPool
+      name: cephblockpools.ceph.rook.io
+      version: v1
+    - description: Represents a Ceph Object Store.
+      displayName: Ceph Object Store
+      kind: CephObjectStore
+      name: cephobjectstores.ceph.rook.io
+      version: v1
+    - description: Represents a Ceph Object Store User.
+      displayName: Ceph Object Store User
+      kind: CephObjectStoreUser
+      name: cephobjectstoreusers.ceph.rook.io
+      version: v1
+
   description: |
     Red Hat Openshift Container Storage (OCS) provides hyperconverged storage for applications within an Openshift cluster.
-
     The OCS operator is the primary operator for Red Hat OpenShift Container Storage (OCS). It serves to facilitate the other operators in OCS by performing administrative tasks outside their scope as well as watching and configuring their CustomResources.
   displayName: Openshift Container Storage Operator
   install:
@@ -85,8 +190,78 @@ spec:
                   resources: {}
                 serviceAccountName: ocs-operator
 
+
+      - name: rook-ceph-operator
+        spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: rook-ceph-operator
+            strategy: {}
+            template:
+              metadata:
+                labels:
+                  app: rook-ceph-operator
+              spec:
+                containers:
+                - args:
+                  - ceph
+                  - operator
+                  env:
+                  - name: ROOK_CURRENT_NAMESPACE_ONLY
+                    value: "true"
+                  - name: FLEXVOLUME_DIR_PATH
+                    value: /etc/kubernetes/kublet-plugins/volume/exec
+                  - name: ROOK_ALLOW_MULTIPLE_FILESYSTEMS
+                    value: "false"
+                  - name: ROOK_LOG_LEVEL
+                    value: INFO
+                  - name: ROOK_MON_HEALTHCHECK_INTERVAL
+                    value: 45s
+                  - name: ROOK_MON_OUT_TIMEOUT
+                    value: 600s
+                  - name: ROOK_DISCOVER_DEVICES_INTERVAL
+                    value: 60m
+                  - name: ROOK_HOSTPATH_REQUIRES_PRIVILEGED
+                    value: "true"
+                  - name: ROOK_ENABLE_SELINUX_RELABELING
+                    value: "true"
+                  - name: ROOK_ENABLE_FSGROUP
+                    value: "true"
+                  - name: ROOK_DISABLE_DEVICE_HOTPLUG
+                    value: "false"
+                  - name: NODE_NAME
+                    valueFrom:
+                      fieldRef:
+                        fieldPath: spec.nodeName
+                  - name: POD_NAME
+                    valueFrom:
+                      fieldRef:
+                        fieldPath: metadata.name
+                  - name: POD_NAMESPACE
+                    valueFrom:
+                      fieldRef:
+                        fieldPath: metadata.namespace
+                  image: quay.io/rook/rook-ceph-operator:latest
+                  imagePullPolicy: Always
+                  name: rook-ceph-operator
+                  resources: {}
+                  volumeMounts:
+                  - mountPath: /var/lib/rook
+                    name: rook-config
+                  - mountPath: /etc/ceph
+                    name: default-config-dir
+                serviceAccountName: rook-ceph-system
+                volumes:
+                - emptyDir: {}
+                  name: rook-config
+                - emptyDir: {}
+                  name: default-config-dir
+
+
       permissions:
-      - rules:
+        - serviceAccountName: ocs-operator
+          rules:
             - apiGroups:
               - ""
               resources:
@@ -130,7 +305,222 @@ spec:
               verbs:
               - '*'
 
-        serviceAccountName: ocs-operator
+
+
+        - serviceAccountName: rook-ceph-mgr
+          rules:
+            - apiGroups:
+              - ""
+              resources:
+              - pods
+              - services
+              verbs:
+              - get
+              - list
+              - watch
+            - apiGroups:
+              - batch
+              resources:
+              - jobs
+              verbs:
+              - get
+              - list
+              - watch
+              - create
+              - update
+              - delete
+            - apiGroups:
+              - ceph.rook.io
+              resources:
+              - '*'
+              verbs:
+              - '*'
+
+
+        - serviceAccountName: rook-ceph-osd
+          rules:
+            - apiGroups:
+              - ""
+              resources:
+              - configmaps
+              verbs:
+              - get
+              - list
+              - watch
+              - create
+              - update
+              - delete
+
+
+        - serviceAccountName: rook-ceph-system
+          rules:
+            - apiGroups:
+              - ""
+              resources:
+              - pods
+              - configmaps
+              - services
+              verbs:
+              - get
+              - list
+              - watch
+              - patch
+              - create
+              - update
+              - delete
+            - apiGroups:
+              - apps
+              resources:
+              - daemonsets
+              - statefulsets
+              verbs:
+              - get
+              - list
+              - watch
+              - create
+              - update
+              - delete
+
+
+
+
+      clusterPermissions:
+
+        - serviceAccountName: rook-ceph-cluster-mgmt
+          rules:
+
+
+        - serviceAccountName: rook-ceph-cluster-mgmt-rules
+          rules:
+            - apiGroups:
+              - ""
+              resources:
+              - secrets
+              - pods
+              - pods/log
+              - services
+              - configmaps
+              verbs:
+              - get
+              - list
+              - watch
+              - patch
+              - create
+              - update
+              - delete
+            - apiGroups:
+              - apps
+              resources:
+              - deployments
+              - daemonsets
+              verbs:
+              - get
+              - list
+              - watch
+              - create
+              - update
+              - delete
+
+
+        - serviceAccountName: rook-ceph-global
+          rules:
+
+
+        - serviceAccountName: rook-ceph-global-rules
+          rules:
+            - apiGroups:
+              - ""
+              resources:
+              - pods
+              - nodes
+              - nodes/proxy
+              verbs:
+              - get
+              - list
+              - watch
+            - apiGroups:
+              - ""
+              resources:
+              - events
+              - persistentvolumes
+              - persistentvolumeclaims
+              - endpoints
+              verbs:
+              - get
+              - list
+              - watch
+              - patch
+              - create
+              - update
+              - delete
+            - apiGroups:
+              - storage.k8s.io
+              resources:
+              - storageclasses
+              verbs:
+              - get
+              - list
+              - watch
+            - apiGroups:
+              - batch
+              resources:
+              - jobs
+              verbs:
+              - get
+              - list
+              - watch
+              - create
+              - update
+              - delete
+            - apiGroups:
+              - ceph.rook.io
+              resources:
+              - '*'
+              verbs:
+              - '*'
+            - apiGroups:
+              - rook.io
+              resources:
+              - '*'
+              verbs:
+              - '*'
+
+
+        - serviceAccountName: rook-ceph-mgr-cluster
+          rules:
+
+
+        - serviceAccountName: rook-ceph-mgr-cluster-rules
+          rules:
+            - apiGroups:
+              - ""
+              resources:
+              - configmaps
+              - nodes
+              - nodes/proxy
+              verbs:
+              - get
+              - list
+              - watch
+
+
+        - serviceAccountName: rook-ceph-mgr-system
+          rules:
+
+
+        - serviceAccountName: rook-ceph-mgr-system-rules
+          rules:
+            - apiGroups:
+              - ""
+              resources:
+              - configmaps
+              verbs:
+              - get
+              - list
+              - watch
+
+
+
     strategy: deployment
   installModes:
   - supported: true
