@@ -1,0 +1,4 @@
+{{.OCS.Deployment}}
+{{if .Converged}}
+{{.RCO.Deployment}}
+{{end}}
