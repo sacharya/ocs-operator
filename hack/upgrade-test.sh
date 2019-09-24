@@ -70,6 +70,8 @@ csv_name=$(oc get csvs -n openshift-storage | grep ocs-operator | head -1 | awk 
 echo "Installed CSV $csv_name"
 
 echo "Success! Deployed $FULL_IMAGE_NAME"
+oc get deployments -n openshift-storage -o jsonpath="{.items[*].spec.template.spec.containers[*].image}" | tr -s '[[:space:]]' '\n' | sort | uniq
+
 echo "Starting the upgrade process now"
 
 # This image should point to the latest version in quay.io
@@ -108,6 +110,7 @@ spec:
   publisher: Red Hat
 EOF
 
+sleep 20
 echo "Updating subscription to use channel: $UPGRADE_VERSION_SUBSCRIBE_CHANNEL"
 cat <<EOF | oc apply -f -
 apiVersion: operators.coreos.com/v1alpha1
@@ -170,12 +173,10 @@ oc wait pod $OCS_CATALOGSOURCE_POD --for condition=Ready -n openshift-marketplac
 OCS_OPERATOR_POD=$(oc get pods -n openshift-storage | grep ocs-operator | head -1 | awk '{ print $1 }')
 oc wait pod $OCS_OPERATOR_POD --for condition=Ready -n openshift-storage --timeout 12m
 
-echo "Verify that deployment image is updated after upgrade"
-oc get deployment ocs-operator -n openshift-storage -o jsonpath='{.spec.template.spec.containers[0].image}'
-echo ""
 echo "Verify that subscription's currentCSV and installedCSV have moved to new version after upgrade"
 oc get subscription ocs-subscription -n openshift-storage -o jsonpath='{.status.currentCSV}'
 echo ""
 oc get subscription ocs-subscription -n openshift-storage -o jsonpath='{.status.installedCSV}'
 echo ""
 echo "Success! Upgraded to $UPGRADE_VERSION_FULL_IMAGE_NAME"
+oc get deployments -n openshift-storage -o jsonpath="{.items[*].spec.template.spec.containers[*].image}" | tr -s '[[:space:]]' '\n' | sort | uniq
