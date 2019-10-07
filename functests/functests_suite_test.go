@@ -1,6 +1,7 @@
 package functests_test
 
 import (
+	"flag"
 	"testing"
 
 	. "github.com/onsi/ginkgo"
@@ -15,7 +16,11 @@ func TestTests(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	flag.Parse()
 	tests.BeforeTestSuiteSetup()
+	if tests.UpgradeToOcsRegistryImage != "" {
+	    tests.UpgradeTestSuiteSetUp()
+	}
 })
 
 var _ = AfterSuite(func() {

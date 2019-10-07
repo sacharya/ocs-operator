@@ -15,10 +15,14 @@ const TestStorageCluster = deploymanager.DefaultStorageCluster
 // StorageClassRBD is the name of the ceph rbd storage class the test suite installs
 const StorageClassRBD = deploymanager.DefaultStorageClassRBD
 
-var ocsRegistryImage string
-var localStorageRegistryImage string
+var OcsRegistryImage string
+var LocalStorageRegistryImage string
+var UpgradeToOcsRegistryImage string
+var UpgradeToLocalStorageRegistryImage string
 
 func init() {
-	flag.StringVar(&ocsRegistryImage, "ocs-registry-image", "", "The ocs-registry container image to use in the deployment")
-	flag.StringVar(&localStorageRegistryImage, "local-storage-registry-image", "", "The local storage registry image to use in the deployment")
+	flag.StringVar(&OcsRegistryImage, "ocs-registry-image", "", "The ocs-registry container image to use in the deployment")
+	flag.StringVar(&LocalStorageRegistryImage, "local-storage-registry-image", "", "The local storage registry image to use in the deployment")
+	flag.StringVar(&UpgradeToOcsRegistryImage, "upgrade-to-ocs-registry-image", "", "The ocs-registry container image to upgrade to in the deployment")
+	flag.StringVar(&UpgradeToLocalStorageRegistryImage, "upgrade-to-local-storage-registry-image", "", "The local storage registry image to upgrade to in the deployment")
 }
