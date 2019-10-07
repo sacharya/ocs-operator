@@ -41,6 +41,9 @@ FULL_IMAGE_NAME="${IMAGE_REGISTRY}/${REGISTRY_NAMESPACE}/${IMAGE_NAME}:${IMAGE_T
 default_local_storage_image="quay.io/gnufied/local-registry:v4.2.0"
 LOCAL_STORAGE_IMAGE_NAME="${LOCAL_STORAGE_IMAGE:-$default_local_storage_image}"
 
+UPGRADE_TO_OCS_REGISTRY_IMAGE="${UPGRADE_TO_OCS_REGISTRY_IMAGE:-}"
+UPGRADE_TO_LOCAL_STORAGE_REGISTRY_NAME="${UPGRADE_TO_LOCAL_STORAGE_REGISTRY_NAME:-}"
+
 # Override the image name when this is invoked from openshift ci
 if [ -n "$OPENSHIFT_BUILD_NAMESPACE" ]; then
 	FULL_IMAGE_NAME="registry.svc.ci.openshift.org/${OPENSHIFT_BUILD_NAMESPACE}/stable:ocs-registry"

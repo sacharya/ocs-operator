@@ -25,9 +25,9 @@ func main() {
 	}
 
 	t, err := deploymanager.NewDeployManager()
-
+	subscriptionChannel := "alpha"
 	if *yamlOutputPath != "" {
-		yaml := t.DumpYAML(*ocsRegistryImage, *localStorageRegistryImage)
+		yaml := t.DumpYAML(*ocsRegistryImage, *localStorageRegistryImage, subscriptionChannel)
 		err = ioutil.WriteFile(*yamlOutputPath, []byte(yaml), 0644)
 		if err != nil {
 			panic(err)
@@ -36,7 +36,7 @@ func main() {
 	}
 
 	log.Printf("Deploying ocs image %s", *ocsRegistryImage)
-	err = t.DeployOCSWithOLM(*ocsRegistryImage, *localStorageRegistryImage)
+	err = t.DeployOCSWithOLM(*ocsRegistryImage, *localStorageRegistryImage, subscriptionChannel)
 	if err != nil {
 		panic(err)
 	}
