@@ -7,6 +7,7 @@ import (
 
 	conditionsv1 "github.com/openshift/custom-resource-status/conditions/v1"
 	ocsv1 "github.com/openshift/ocs-operator/pkg/apis/ocs/v1"
+	cephv1 "github.com/rook/rook/pkg/apis/ceph.rook.io/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -366,5 +367,98 @@ func (t *DeployManager) startStorageCluster() error {
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return err
 	}
+	return nil
+}
+
+// Delete all ceph clusters in the namespace
+func (t *DeployManager) deleteCephClusters() error {
+	err := t.rookCephClient.Delete().
+		Resource("cephclusters").
+		Namespace(InstallNamespace).
+		VersionedParams(&metav1.DeleteOptions{}, t.parameterCodec).
+		Do().
+		Error()
+
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	return nil
+}
+
+// Delete all nooba systems in the namespace
+func (t *DeployManager) deleteNoobaaSystems() error {
+	err := t.noobaaClient.Delete().
+		Resource("noobaas").
+		Namespace(InstallNamespace).
+		VersionedParams(&metav1.DeleteOptions{}, t.parameterCodec).
+		Do().
+		Error()
+
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	return nil
+}
+
+// Delete all storage clusters in the namespace
+func (t *DeployManager) deleteStorageClusters() error {
+	deletePolicy := metav1.DeletePropagationForeground
+
+	crds := []string{"storageclusters", "storageclusterinitializations"}
+	for _, name := range crds {
+		err := t.ocsClient.Delete().
+			Resource(name).
+			Namespace(InstallNamespace).
+			VersionedParams(&metav1.DeleteOptions{PropagationPolicy: &deletePolicy,}, t.parameterCodec).
+			Do().
+			Error()
+
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// Get all cephClusters in the namespace
+func (t *DeployManager) getCephClusters() (*cephv1.CephClusterList, error) {
+	cephClusters := &cephv1.CephClusterList{}
+
+	// TODO: Figure out why this is causing runtime.nonRegistered error
+	err := t.rookCephClient.Get().
+		Resource("cephclusters").
+		Namespace(InstallNamespace).
+		VersionedParams(&metav1.ListOptions{}, t.parameterCodec).
+		Do().
+		Into(cephClusters)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return cephClusters, nil
+}
+
+// Remove finalizers from all cephclusters, to not block the cleanup
+func (t *DeployManager) removeCephClusterFinalizers() error {
+	// TODO: patch all cephclusters
+	//cephClusters, err := t.getCephClusters()
+
+	patch := []byte(`[{"op":"remove","path":"/metadata/finalizers"}]`)
+	err := t.rookCephClient.Patch(types.JSONPatchType).
+		Resource("cephclusters").
+		Namespace(InstallNamespace).
+		Name(DefaultStorageClusterName).
+		Body(patch).
+		Do().
+		Error()
+
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
 	return nil
 }

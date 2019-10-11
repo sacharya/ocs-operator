@@ -3,7 +3,6 @@ package functests
 import (
 	"flag"
 
-	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	deploymanager "github.com/openshift/ocs-operator/pkg/deploy-manager"
 )
@@ -23,47 +22,35 @@ func BeforeTestSuiteSetup() {
 
 	err = t.StartDefaultStorageCluster()
 	gomega.Expect(err).To(gomega.BeNil())
-
 }
 
 // AfterTestSuiteCleanup is the function called to tear down the test environment
 func AfterTestSuiteCleanup() {
 	flag.Parse()
-
 	t, err := deploymanager.NewDeployManager()
 	gomega.Expect(err).To(gomega.BeNil())
 
 	err = t.DeleteNamespaceAndWait(TestNamespace)
 	gomega.Expect(err).To(gomega.BeNil())
 
-	// TODO uninstall storage cluster.
-	// Right now uninstall doesn't work. Once uninstall functions
-	// properly, we'll want to uninstall the storage cluster after
-	// the testsuite completes
+	err = t.UninstallOCS(OcsRegistryImage, LocalStorageRegistryImage, OcsSubscriptionChannel)
+	gomega.Expect(err).To(gomega.BeNil())
 }
 
-// UpgradeTestSuiteSetUp is the function called to upgrade the test environment
-func UpgradeTestSuiteSetUp() {
+// BeforeUpgradeTestSuiteSetup is the function called to initialize the test environment to the upgrade_from version
+func BeforeUpgradeTestSuiteSetup() {
 	flag.Parse()
-
-	if UpgradeToOcsRegistryImage == "" || UpgradeToLocalStorageRegistryImage == "" {
-		ginkgo.Skip("Condition not met for upgrade")
-	}
 
 	t, err := deploymanager.NewDeployManager()
 	gomega.Expect(err).To(gomega.BeNil())
 
-	// Get the current csv before the upgrade
-	csv, err := t.GetCsv()
+	err = t.CreateNamespace(TestNamespace)
 	gomega.Expect(err).To(gomega.BeNil())
 
-	err = t.UpgradeOCSWithOLM(UpgradeToOcsRegistryImage, UpgradeToLocalStorageRegistryImage, UpgradeToOcsSubscriptionChannel)
+	err = t.DeployOCSWithOLM(UpgradeFromOcsRegistryImage, UpgradeFromLocalStorageRegistryImage, UpgradeFromOcsSubscriptionChannel)
 	gomega.Expect(err).To(gomega.BeNil())
 
-	err = t.WaitForUpgradeCatalogSource(csv.Name, UpgradeToOcsSubscriptionChannel)
-	gomega.Expect(err).To(gomega.BeNil())
-
-	// Make sure StorageCluster previously created in the environment is still healthy
-	err = t.WaitOnStorageCluster()
+	err = t.StartDefaultStorageCluster()
 	gomega.Expect(err).To(gomega.BeNil())
 }
+

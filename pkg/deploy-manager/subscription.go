@@ -8,6 +8,7 @@ import (
 	"time"
 
 	yaml "github.com/ghodss/yaml"
+	"github.com/operator-framework/operator-lifecycle-manager/pkg/controller/install"
 	v1 "github.com/operator-framework/operator-lifecycle-manager/pkg/api/apis/operators/v1"
 	v1alpha1 "github.com/operator-framework/operator-lifecycle-manager/pkg/api/apis/operators/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -70,9 +71,43 @@ func (t *DeployManager) deployClusterObjects(co *clusterObjects) error {
 	}
 
 	// Wait on ocs-operator, rook-ceph-operator and noobaa-operator to come online.
-	err = t.waitForOCSOperator()
+	err = t.WaitForOCSOperator()
 	if err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func (t *DeployManager) deleteClusterObjects(co *clusterObjects) error {
+
+	for _, operatorGroup := range co.operatorGroups {
+		err := t.olmClient.OperatorsV1().OperatorGroups(operatorGroup.Namespace).Delete(operatorGroup.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+		    return err
+		}
+
+	}
+
+	for _, catalogSource := range co.catalogSources {
+		err := t.olmClient.OperatorsV1alpha1().CatalogSources(catalogSource.Namespace).Delete(catalogSource.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+		    return err
+		}
+	}
+
+	for _, subscription := range co.subscriptions {
+		err := t.olmClient.OperatorsV1alpha1().Subscriptions(subscription.Namespace).Delete(subscription.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+		    return err
+		}
+	}
+
+	for _, namespace := range co.namespaces {
+		err := t.DeleteNamespaceAndWait(namespace.Name)
+		if err != nil {
+		    return err
+		}
 	}
 
 	return nil
@@ -336,8 +371,116 @@ func (t *DeployManager) UpgradeOCSWithOLM(ocsRegistryImage string, localStorageR
 	return nil
 }
 
-// waitForOCSOperator waits for the ocs-operator to come online
-func (t *DeployManager) waitForOCSOperator() error {
+// UninstallOCS uninstalls ocs operator and storage clusters
+func (t *DeployManager) UninstallOCS(ocsRegistryImage string, localStorageRegistryImage string, subscriptionChannel string) error {
+	// Remove finalizers from all cephclusters to not block the cleanup
+	err := t.removeCephClusterFinalizers()
+	if err != nil {
+		return err
+	}
+
+	// delete storage clusters and storareclusterinitialization objects
+	err = t.deleteStorageClusters()
+	if err != nil {
+		return err
+	}
+
+	err = t.deleteNoobaaSystems()
+	if err != nil {
+		//return err
+	}
+
+	err = t.k8sClient.AppsV1().StatefulSets(InstallNamespace).Delete("noobaa-core", &metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	// Delete all noobaa-core related pods
+	err = t.k8sClient.CoreV1().Pods(InstallNamespace).DeleteCollection(&metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "noobaa-core"})
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	err = t.deleteCephClusters()
+	if err != nil {
+		//return err
+	}
+
+	// Delete all operator deployments
+	deployments := []string{"noobaa-operator", "rook-ceph-operator", "ocs-operator"}
+	for _, name := range deployments {
+		err := t.k8sClient.AppsV1().Deployments(InstallNamespace).Delete(name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	// Delete all subscriptions in the namespace
+	subscriptions, err := t.olmClient.OperatorsV1alpha1().Subscriptions(InstallNamespace).List(metav1.ListOptions{})
+	for _, subscription := range subscriptions.Items {
+		err := t.olmClient.OperatorsV1alpha1().Subscriptions(InstallNamespace).Delete(subscription.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	// Delete all remaining deployments in the namespace
+	deployments1, err := t.k8sClient.AppsV1().Deployments(InstallNamespace).List(metav1.ListOptions{})
+	for _, deployment := range deployments1.Items {
+		err := t.k8sClient.AppsV1().Deployments(InstallNamespace).Delete(deployment.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	// Delete all remaining daemonsets in the namespace
+	daemonsets, err := t.k8sClient.AppsV1().DaemonSets(InstallNamespace).List(metav1.ListOptions{})
+	for _, daemonset := range daemonsets.Items {
+		err := t.k8sClient.AppsV1().DaemonSets(InstallNamespace).Delete(daemonset.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	// Delete all remaining pods in the namespace
+	pods, err := t.k8sClient.CoreV1().Pods(InstallNamespace).List(metav1.ListOptions{})
+	for _, pod := range pods.Items {
+		err := t.k8sClient.CoreV1().Pods(InstallNamespace).Delete(pod.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	// Delete all PVCs in the namespace
+	pvcs, err := t.k8sClient.CoreV1().PersistentVolumeClaims(InstallNamespace).List(metav1.ListOptions{})
+	for _, pvc := range pvcs.Items {
+		err := t.k8sClient.CoreV1().PersistentVolumeClaims(InstallNamespace).Delete(pvc.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	// Delete all PVs in the namespace
+	pvs, err := t.k8sClient.CoreV1().PersistentVolumes().List(metav1.ListOptions{})
+	for _, pv := range pvs.Items {
+		err := t.k8sClient.CoreV1().PersistentVolumes().Delete(pv.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	// Delete remaining operator manifests
+	co := t.generateClusterObjects(ocsRegistryImage, localStorageRegistryImage, subscriptionChannel)
+	err = t.deleteClusterObjects(co)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// WaitForOCSOperator waits for the ocs-operator to come online
+func (t *DeployManager) WaitForOCSOperator() error {
 	deployments := []string{"ocs-operator", "rook-ceph-operator", "noobaa-operator"}
 
 	timeout := 1000 * time.Second
@@ -388,6 +531,15 @@ func (t *DeployManager) updateClusterObjects(co *clusterObjects) error {
 		}
 
 	}
+
+	// TODO: Verify this is a new catalog source. But does it have to be a new catalogsource?
+	// Can we upgrade to a new subscription channel?
+	// Wait for catalog source before updating subscription
+	err := t.waitForOCSCatalogSource()
+	if err != nil {
+		return err
+	}
+
 	for _, subscription := range co.subscriptions {
 		sub, err := t.olmClient.OperatorsV1alpha1().Subscriptions(subscription.Namespace).Get(subscription.Name, metav1.GetOptions{})
 		sub.Spec.Channel = subscription.Spec.Channel
@@ -400,8 +552,8 @@ func (t *DeployManager) updateClusterObjects(co *clusterObjects) error {
 	return nil
 }
 
-// WaitForUpgradeCatalogSource waits for the catalogsource to come online after an upgrade
-func (t *DeployManager) WaitForUpgradeCatalogSource(csvName string, subscriptionChannel string) error {
+// WaitForCsvUpgrade waits for the catalogsource to come online after an upgrade
+func (t *DeployManager) WaitForCsvUpgrade(csvName string, subscriptionChannel string) error {
 	timeout := 1200 * time.Second
 	// NOTE the long timeout above. It can take quite a bit of time for the
 	// ocs operator deployments to roll out
@@ -414,6 +566,7 @@ func (t *DeployManager) WaitForUpgradeCatalogSource(csvName string, subscription
 	waitErr := utilwait.PollImmediate(interval, timeout, func() (done bool, err error) {
 		sub, err := t.olmClient.OperatorsV1alpha1().Subscriptions(InstallNamespace).Get(subscription, metav1.GetOptions{})
 		if sub.Spec.Channel != subscriptionChannel {
+			lastReason = fmt.Sprintf("waiting on subscription channel to be updated to %s ", subscriptionChannel)
 			return false, nil
 		}
 		csvs, err := t.olmClient.OperatorsV1alpha1().ClusterServiceVersions(InstallNamespace).List(metav1.ListOptions{})
@@ -426,11 +579,7 @@ func (t *DeployManager) WaitForUpgradeCatalogSource(csvName string, subscription
 				}
 			}
 		}
-		if err != nil {
-			lastReason = fmt.Sprintf("waiting on csv to be created and installed")
-			return false, nil
-		}
-
+		lastReason = fmt.Sprintf("waiting on csv to be created and installed")
 		return false, nil
 	})
 
@@ -452,4 +601,31 @@ func (t *DeployManager) GetCsv() (v1alpha1.ClusterServiceVersion, error){
 		}
 	}
 	return csv, err
+}
+
+// VerifyComponentOperators makes sure that deployment images matches the ones specified in the csv deployment specs
+func (t *DeployManager) VerifyComponentOperators() error {
+	csv, err := t.GetCsv()
+	if err != nil {
+		return err
+	}
+
+	resolver := install.StrategyResolver{}
+	strategy, err := resolver.UnmarshalStrategy(csv.Spec.InstallStrategy)
+	if err != nil {
+		return err
+	}
+
+	strategyDetailsDeployment, _ := strategy.(*install.StrategyDetailsDeployment)
+	for _, deployment := range strategyDetailsDeployment.DeploymentSpecs {
+		image := deployment.Spec.Template.Spec.Containers[0].Image
+		foundImage, err := t.GetDeploymentImage(deployment.Name)
+		if err != nil {
+			return err
+		}
+		if image != foundImage {
+			return fmt.Errorf("Deployment: %s Expected image: %s Found image  %s", deployment.Name, image, foundImage)
+		}
+	}
+	return nil
 }

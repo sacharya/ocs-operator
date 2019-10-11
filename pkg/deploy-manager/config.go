@@ -6,6 +6,8 @@ import (
 
 	ocsv1 "github.com/openshift/ocs-operator/pkg/apis/ocs/v1"
 	olmclient "github.com/operator-framework/operator-lifecycle-manager/pkg/api/client/clientset/versioned"
+	noobaav1alpha1 "github.com/noobaa/noobaa-operator/v2/pkg/apis/noobaa/v1alpha1"
+	cephv1 "github.com/rook/rook/pkg/apis/ceph.rook.io/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes"
@@ -35,6 +37,8 @@ type DeployManager struct {
 	olmClient      *olmclient.Clientset
 	k8sClient      *kubernetes.Clientset
 	ocsClient      *rest.RESTClient
+	rookCephClient *rest.RESTClient
+	noobaaClient   *rest.RESTClient
 	parameterCodec runtime.ParameterCodec
 }
 
@@ -93,6 +97,40 @@ func NewDeployManager() (*DeployManager, error) {
 		return nil, err
 	}
 
+	// rook ceph rest client
+	rookCephConfig, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	if err != nil {
+	    return nil, err
+	}
+	rookCephConfig.GroupVersion = &cephv1.SchemeGroupVersion
+	rookCephConfig.NegotiatedSerializer = serializer.DirectCodecFactory{CodecFactory: codecs}
+	rookCephConfig.APIPath = "/apis"
+	rookCephConfig.ContentType = runtime.ContentTypeJSON
+	if rookCephConfig.UserAgent == "" {
+	    rookCephConfig.UserAgent = rest.DefaultKubernetesUserAgent()
+	}
+	rookCephClient, err := rest.RESTClientFor(rookCephConfig)
+	if err != nil {
+	    return nil, err
+	}
+
+	// noobaa rest client
+	noobaaConfig, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	if err != nil {
+	    return nil, err
+	}
+	noobaaConfig.GroupVersion = &noobaav1alpha1.SchemeGroupVersion
+	noobaaConfig.NegotiatedSerializer = serializer.DirectCodecFactory{CodecFactory: codecs}
+	noobaaConfig.APIPath = "/apis"
+	noobaaConfig.ContentType = runtime.ContentTypeJSON
+	if noobaaConfig.UserAgent == "" {
+	    noobaaConfig.UserAgent = rest.DefaultKubernetesUserAgent()
+	}
+	noobaaClient, err := rest.RESTClientFor(noobaaConfig)
+	if err != nil {
+	    return nil, err
+	}
+
 	// olm client
 	olmConfig, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
@@ -110,6 +148,8 @@ func NewDeployManager() (*DeployManager, error) {
 		olmClient:      olmClient,
 		k8sClient:      k8sClient,
 		ocsClient:      ocsClient,
+		rookCephClient: rookCephClient,
+		noobaaClient:   noobaaClient,
 		parameterCodec: parameterCodec,
 	}, nil
 }
