@@ -8,6 +8,8 @@ import (
 	olmclient "github.com/operator-framework/operator-lifecycle-manager/pkg/api/client/clientset/versioned"
 	noobaav1alpha1 "github.com/noobaa/noobaa-operator/v2/pkg/apis/noobaa/v1alpha1"
 	cephv1 "github.com/rook/rook/pkg/apis/ceph.rook.io/v1"
+	cv1 "github.com/rook/rook/pkg/client/clientset/versioned/typed/ceph.rook.io/v1"
+	rookclient "github.com/rook/rook/pkg/client/clientset/versioned"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes"
@@ -38,7 +40,9 @@ type DeployManager struct {
 	k8sClient      *kubernetes.Clientset
 	ocsClient      *rest.RESTClient
 	rookCephClient *rest.RESTClient
+	rookClient     *rookclient.Clientset
 	noobaaClient   *rest.RESTClient
+	storageClient  *rest.RESTClient
 	parameterCodec runtime.ParameterCodec
 }
 
@@ -50,6 +54,11 @@ func (t *DeployManager) GetK8sClient() *kubernetes.Clientset {
 // GetOcsClient is the function used to retrieve the ocs client
 func (t *DeployManager) GetOcsClient() *rest.RESTClient {
 	return t.ocsClient
+}
+
+// GetRookCephClient is the function used to retrieve the rookCeph client
+func (t *DeployManager) GetRookCephClient() cv1.CephV1Interface {
+	return t.rookClient.CephV1()
 }
 
 // GetParameterCodec is the function used to retrieve the parameterCodec
@@ -113,6 +122,12 @@ func NewDeployManager() (*DeployManager, error) {
 	if err != nil {
 	    return nil, err
 	}
+	rc, err := rookclient.NewForConfig(rookCephConfig)
+	//rookCephClient := rc.CephV1()
+	//rookClient, err := rookclient.NewForConfig(config)
+	if err != nil {
+	   return nil, err
+	}
 
 	// noobaa rest client
 	noobaaConfig, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
@@ -149,6 +164,7 @@ func NewDeployManager() (*DeployManager, error) {
 		k8sClient:      k8sClient,
 		ocsClient:      ocsClient,
 		rookCephClient: rookCephClient,
+		rookClient:     rc,
 		noobaaClient:   noobaaClient,
 		parameterCodec: parameterCodec,
 	}, nil

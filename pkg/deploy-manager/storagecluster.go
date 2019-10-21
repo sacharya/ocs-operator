@@ -307,7 +307,7 @@ func (t *DeployManager) WaitOnStorageCluster() error {
 
 		if noobaaCoreOnline == 0 {
 			lastReason = "Waiting on noobaa-core pod to come online"
-			return false, nil
+			//return false, nil
 		}
 
 		return true, nil
