@@ -360,3 +360,136 @@ func (t *DeployManager) waitForOCSOperator() error {
 
 	return nil
 }
+
+// UninstallOCS uninstalls ocs operator and storage clusters
+func (t *DeployManager) UninstallOCS(ocsRegistryImage string, localStorageRegistryImage string) error {
+	// Remove finalizers from all cephclusters to not block the cleanup
+	err := t.removeCephClusterFinalizers()
+	if err != nil {
+		return err
+	}
+
+	// delete storage clusters and storareclusterinitialization objects
+	err = t.deleteStorageClusters()
+	if err != nil {
+		return err
+	}
+
+	err = t.deleteNoobaaSystems()
+	if err != nil {
+		return err
+	}
+
+	err = t.k8sClient.AppsV1().StatefulSets(InstallNamespace).Delete("noobaa-core", &metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	// Delete all noobaa-core related pods
+	err = t.k8sClient.CoreV1().Pods(InstallNamespace).DeleteCollection(&metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "noobaa-core"})
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	err = t.deleteCephClusters()
+	if err != nil {
+		return err
+	}
+
+	// Delete all operator deployments
+	deployments := []string{"noobaa-operator", "rook-ceph-operator", "ocs-operator"}
+	for _, name := range deployments {
+		err := t.k8sClient.AppsV1().Deployments(InstallNamespace).Delete(name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	// Delete all subscriptions in the namespace
+	subscriptions, err := t.olmClient.OperatorsV1alpha1().Subscriptions(InstallNamespace).List(metav1.ListOptions{})
+	for _, subscription := range subscriptions.Items {
+		err := t.olmClient.OperatorsV1alpha1().Subscriptions(InstallNamespace).Delete(subscription.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	// Delete all remaining deployments in the namespace
+	deployments1, err := t.k8sClient.AppsV1().Deployments(InstallNamespace).List(metav1.ListOptions{})
+	for _, deployment := range deployments1.Items {
+		err := t.k8sClient.AppsV1().Deployments(InstallNamespace).Delete(deployment.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	// Delete all remaining daemonsets in the namespace
+	daemonsets, err := t.k8sClient.AppsV1().DaemonSets(InstallNamespace).List(metav1.ListOptions{})
+	for _, daemonset := range daemonsets.Items {
+		err := t.k8sClient.AppsV1().DaemonSets(InstallNamespace).Delete(daemonset.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	// Delete all remaining pods in the namespace
+	pods, err := t.k8sClient.CoreV1().Pods(InstallNamespace).List(metav1.ListOptions{})
+	for _, pod := range pods.Items {
+		err := t.k8sClient.CoreV1().Pods(InstallNamespace).Delete(pod.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	// Delete all PVCs in the namespace
+	pvcs, err := t.k8sClient.CoreV1().PersistentVolumeClaims(InstallNamespace).List(metav1.ListOptions{})
+	for _, pvc := range pvcs.Items {
+		err := t.k8sClient.CoreV1().PersistentVolumeClaims(InstallNamespace).Delete(pvc.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	// Delete remaining operator manifests
+	co := t.generateClusterObjects(ocsRegistryImage, localStorageRegistryImage)
+	err = t.deleteClusterObjects(co)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (t *DeployManager) deleteClusterObjects(co *clusterObjects) error {
+
+	for _, operatorGroup := range co.operatorGroups {
+		err := t.olmClient.OperatorsV1().OperatorGroups(operatorGroup.Namespace).Delete(operatorGroup.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+		    return err
+		}
+
+	}
+
+	for _, catalogSource := range co.catalogSources {
+		err := t.olmClient.OperatorsV1alpha1().CatalogSources(catalogSource.Namespace).Delete(catalogSource.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+		    return err
+		}
+	}
+
+	for _, subscription := range co.subscriptions {
+		err := t.olmClient.OperatorsV1alpha1().Subscriptions(subscription.Namespace).Delete(subscription.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+		    return err
+		}
+	}
+
+	for _, namespace := range co.namespaces {
+		err := t.DeleteNamespaceAndWait(namespace.Name)
+		if err != nil {
+		    return err
+		}
+	}
+
+	return nil
+}

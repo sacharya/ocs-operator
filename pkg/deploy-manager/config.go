@@ -4,14 +4,17 @@ import (
 	"fmt"
 	"os"
 
+	noobaa "github.com/noobaa/noobaa-operator/v2/pkg/apis"
 	ocsv1 "github.com/openshift/ocs-operator/pkg/apis/ocs/v1"
 	olmclient "github.com/operator-framework/operator-lifecycle-manager/pkg/api/client/clientset/versioned"
+	cephv1 "github.com/rook/rook/pkg/apis/ceph.rook.io/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // InstallNamespace is the namespace ocs is installed into
@@ -28,6 +31,8 @@ const MinOSDsCount = 3
 
 func init() {
 	ocsv1.SchemeBuilder.AddToScheme(scheme.Scheme)
+	cephv1.SchemeBuilder.AddToScheme(scheme.Scheme)
+	noobaa.AddToScheme(scheme.Scheme)
 }
 
 // DeployManager is a util tool used by the functional tests
@@ -35,7 +40,13 @@ type DeployManager struct {
 	olmClient      *olmclient.Clientset
 	k8sClient      *kubernetes.Clientset
 	ocsClient      *rest.RESTClient
+	crClient       crclient.Client
 	parameterCodec runtime.ParameterCodec
+}
+
+// GetCrClient is the function used to retrieve the controller-runtime client
+func (t *DeployManager) GetCrClient() crclient.Client {
+	return t.crClient
 }
 
 // GetK8sClient is the function used to retrieve the kubernetes client
@@ -93,6 +104,9 @@ func NewDeployManager() (*DeployManager, error) {
 		return nil, err
 	}
 
+	// controller-runtime client
+	crClient, err := crclient.New(config, crclient.Options{Scheme: scheme.Scheme})
+
 	// olm client
 	olmConfig, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
@@ -110,6 +124,7 @@ func NewDeployManager() (*DeployManager, error) {
 		olmClient:      olmClient,
 		k8sClient:      k8sClient,
 		ocsClient:      ocsClient,
+		crClient:       crClient,
 		parameterCodec: parameterCodec,
 	}, nil
 }

@@ -1,12 +1,15 @@
 package deploymanager
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	conditionsv1 "github.com/openshift/custom-resource-status/conditions/v1"
 	ocsv1 "github.com/openshift/ocs-operator/pkg/apis/ocs/v1"
+	noobaav1alpha1 "github.com/noobaa/noobaa-operator/v2/pkg/apis/noobaa/v1alpha1"
+	cephv1 "github.com/rook/rook/pkg/apis/ceph.rook.io/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -16,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
+	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // StartDefaultStorageCluster creates and waits on a StorageCluster to come online
@@ -380,5 +384,95 @@ func (t *DeployManager) startStorageCluster() error {
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return err
 	}
+	return nil
+}
+
+// Retrieve all ceph clusters in the namespace
+func (t *DeployManager) getCephClusters() (*cephv1.CephClusterList, error) {
+	cephClusters := &cephv1.CephClusterList{}
+	listOptions := &crclient.ListOptions {
+		Namespace: InstallNamespace,
+	}
+	err := t.GetCrClient().List(context.TODO(), listOptions, cephClusters)
+	if err != nil && !errors.IsNotFound(err) {
+		return nil, err
+	}
+	return cephClusters, nil
+}
+
+// Delete all ceph clusters in the namespace
+func (t *DeployManager) deleteCephClusters() error {
+	cephClusters, err := t.getCephClusters()
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	for _, cephCluster := range cephClusters.Items {
+		err = t.GetCrClient().Delete(context.TODO(), &cephCluster)
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// Delete all nooba systems in the namespace
+func (t *DeployManager) deleteNoobaaSystems() error {
+	noobaas := &noobaav1alpha1.NooBaaList{}
+	listOptions := &crclient.ListOptions {
+		Namespace: InstallNamespace,
+	}
+	err := t.GetCrClient().List(context.TODO(), listOptions, noobaas)
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	for _, noobaa := range noobaas.Items {
+		err = t.GetCrClient().Delete(context.TODO(), &noobaa)
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// Delete all storage clusters in the namespace
+func (t *DeployManager) deleteStorageClusters() error {
+	deletePolicy := metav1.DeletePropagationForeground
+
+	crds := []string{"storageclusters", "storageclusterinitializations"}
+	for _, name := range crds {
+		err := t.GetOcsClient().Delete().
+			Resource(name).
+			Namespace(InstallNamespace).
+			VersionedParams(&metav1.DeleteOptions{PropagationPolicy: &deletePolicy,}, t.parameterCodec).
+			Do().
+			Error()
+
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// Remove finalizers from all cephclusters, to not block the cleanup
+func (t *DeployManager) removeCephClusterFinalizers() error {
+	cephClusters, err := t.getCephClusters()
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	for _, cephCluster := range cephClusters.Items {
+		cephCluster.ObjectMeta.Finalizers = []string{}
+		err := t.GetCrClient().Update(context.TODO(), &cephCluster)
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
 	return nil
 }
