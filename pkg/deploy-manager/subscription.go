@@ -363,55 +363,14 @@ func (t *DeployManager) waitForOCSOperator() error {
 
 // UninstallOCS uninstalls ocs operator and storage clusters
 func (t *DeployManager) UninstallOCS(ocsRegistryImage string, localStorageRegistryImage string) error {
-	// Remove finalizers from all cephclusters to not block the cleanup
-	err := t.removeCephClusterFinalizers()
+	err := t.deleteNoobaaSystemsAndWait()
 	if err != nil {
 		return err
 	}
 
-	// delete storage clusters and storareclusterinitialization objects
 	err = t.deleteStorageClusters()
 	if err != nil {
 		return err
-	}
-
-	err = t.deleteNoobaaSystems()
-	if err != nil {
-		return err
-	}
-
-	err = t.k8sClient.AppsV1().StatefulSets(InstallNamespace).Delete("noobaa-core", &metav1.DeleteOptions{})
-	if err != nil && !errors.IsNotFound(err) {
-		return err
-	}
-
-	// Delete all noobaa-core related pods
-	err = t.k8sClient.CoreV1().Pods(InstallNamespace).DeleteCollection(&metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "noobaa-core"})
-	if err != nil && !errors.IsNotFound(err) {
-		return err
-	}
-
-	err = t.deleteCephClusters()
-	if err != nil {
-		return err
-	}
-
-	// Delete all operator deployments
-	deployments := []string{"noobaa-operator", "rook-ceph-operator", "ocs-operator"}
-	for _, name := range deployments {
-		err := t.k8sClient.AppsV1().Deployments(InstallNamespace).Delete(name, &metav1.DeleteOptions{})
-		if err != nil && !errors.IsNotFound(err) {
-			return err
-		}
-	}
-
-	// Delete all subscriptions in the namespace
-	subscriptions, err := t.olmClient.OperatorsV1alpha1().Subscriptions(InstallNamespace).List(metav1.ListOptions{})
-	for _, subscription := range subscriptions.Items {
-		err := t.olmClient.OperatorsV1alpha1().Subscriptions(InstallNamespace).Delete(subscription.Name, &metav1.DeleteOptions{})
-		if err != nil && !errors.IsNotFound(err) {
-			return err
-		}
 	}
 
 	// Delete all remaining deployments in the namespace
