@@ -9,6 +9,7 @@ import (
 	"time"
 
 	yaml "github.com/ghodss/yaml"
+	"github.com/operator-framework/operator-lifecycle-manager/pkg/controller/install"
 	v1 "github.com/operator-framework/operator-lifecycle-manager/pkg/api/apis/operators/v1"
 	v1alpha1 "github.com/operator-framework/operator-lifecycle-manager/pkg/api/apis/operators/v1alpha1"
 	ocsv1 "github.com/openshift/ocs-operator/pkg/apis/ocs/v1"
@@ -73,7 +74,7 @@ func (t *DeployManager) deployClusterObjects(co *clusterObjects) error {
 	}
 
 	// Wait on ocs-operator, rook-ceph-operator and noobaa-operator to come online.
-	err = t.waitForOCSOperator()
+	err = t.WaitForOCSOperator()
 	if err != nil {
 		return err
 	}
@@ -81,7 +82,41 @@ func (t *DeployManager) deployClusterObjects(co *clusterObjects) error {
 	return nil
 }
 
-func (t *DeployManager) generateClusterObjects(ocsRegistryImage string, localStorageRegistryImage string) *clusterObjects {
+func (t *DeployManager) deleteClusterObjects(co *clusterObjects) error {
+
+	for _, operatorGroup := range co.operatorGroups {
+		err := t.olmClient.OperatorsV1().OperatorGroups(operatorGroup.Namespace).Delete(operatorGroup.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+		    return err
+		}
+
+	}
+
+	for _, catalogSource := range co.catalogSources {
+		err := t.olmClient.OperatorsV1alpha1().CatalogSources(catalogSource.Namespace).Delete(catalogSource.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+		    return err
+		}
+	}
+
+	for _, subscription := range co.subscriptions {
+		err := t.olmClient.OperatorsV1alpha1().Subscriptions(subscription.Namespace).Delete(subscription.Name, &metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+		    return err
+		}
+	}
+
+	for _, namespace := range co.namespaces {
+		err := t.DeleteNamespaceAndWait(namespace.Name)
+		if err != nil {
+		    return err
+		}
+	}
+
+	return nil
+}
+
+func (t *DeployManager) generateClusterObjects(ocsRegistryImage string, localStorageRegistryImage string, subscriptionChannel string) *clusterObjects {
 
 	co := &clusterObjects{}
 	label := make(map[string]string)
@@ -175,7 +210,7 @@ func (t *DeployManager) generateClusterObjects(ocsRegistryImage string, localSto
 			Namespace: InstallNamespace,
 		},
 		Spec: &v1alpha1.SubscriptionSpec{
-			Channel:                "alpha",
+			Channel:                subscriptionChannel,
 			Package:                "ocs-operator",
 			CatalogSource:          "ocs-catalogsource",
 			CatalogSourceNamespace: marketplaceNamespace,
@@ -233,8 +268,8 @@ func marshallObject(obj interface{}, writer io.Writer) error {
 }
 
 // DumpYAML dumps ocs deployment yaml
-func (t *DeployManager) DumpYAML(ocsRegistryImage string, localStorageRegistryImage string) string {
-	co := t.generateClusterObjects(ocsRegistryImage, localStorageRegistryImage)
+func (t *DeployManager) DumpYAML(ocsRegistryImage string, localStorageRegistryImage string, subscriptionChannel string) string {
+	co := t.generateClusterObjects(ocsRegistryImage, localStorageRegistryImage, subscriptionChannel)
 
 	writer := strings.Builder{}
 
@@ -308,13 +343,13 @@ func (t *DeployManager) waitForOCSCatalogSource() error {
 }
 
 // DeployOCSWithOLM deploys ocs operator via an olm subscription
-func (t *DeployManager) DeployOCSWithOLM(ocsRegistryImage string, localStorageRegistryImage string) error {
+func (t *DeployManager) DeployOCSWithOLM(ocsRegistryImage string, localStorageRegistryImage string, subscriptionChannel string) error {
 
 	if ocsRegistryImage == "" || localStorageRegistryImage == "" {
 		return fmt.Errorf("catalog registry images not supplied")
 	}
 
-	co := t.generateClusterObjects(ocsRegistryImage, localStorageRegistryImage)
+	co := t.generateClusterObjects(ocsRegistryImage, localStorageRegistryImage, subscriptionChannel)
 	err := t.deployClusterObjects(co)
 	if err != nil {
 		return err
@@ -323,7 +358,24 @@ func (t *DeployManager) DeployOCSWithOLM(ocsRegistryImage string, localStorageRe
 	return nil
 }
 
-func (t *DeployManager) waitForOCSOperator() error {
+// UpgradeOCSWithOLM upgrades ocs operator via an olm subscription
+func (t *DeployManager) UpgradeOCSWithOLM(ocsRegistryImage string, localStorageRegistryImage string, subscriptionChannel string) error {
+
+	if ocsRegistryImage == "" || localStorageRegistryImage == "" {
+		return fmt.Errorf("catalog registry images not supplied")
+	}
+
+	co := t.generateClusterObjects(ocsRegistryImage, localStorageRegistryImage, subscriptionChannel)
+	err := t.updateClusterObjects(co)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// WaitForOCSOperator waits for the ocs-operator to come online
+func (t *DeployManager) WaitForOCSOperator() error {
 	deployments := []string{"ocs-operator", "rook-ceph-operator", "noobaa-operator"}
 
 	timeout := 1000 * time.Second

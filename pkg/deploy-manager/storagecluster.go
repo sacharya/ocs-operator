@@ -7,6 +7,7 @@ import (
 
 	conditionsv1 "github.com/openshift/custom-resource-status/conditions/v1"
 	ocsv1 "github.com/openshift/ocs-operator/pkg/apis/ocs/v1"
+	cephv1 "github.com/rook/rook/pkg/apis/ceph.rook.io/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -39,7 +40,7 @@ func (t *DeployManager) StartDefaultStorageCluster() error {
 	}
 
 	// Ensure storage cluster is online before starting tests
-	err = t.waitOnStorageCluster()
+	err = t.WaitOnStorageCluster()
 	if err != nil {
 		return err
 	}
@@ -181,8 +182,8 @@ func (t *DeployManager) createStorageCluster() (*ocsv1.StorageCluster, error) {
 	return newSc, nil
 }
 
-// wait for storage cluster to come online
-func (t *DeployManager) waitOnStorageCluster() error {
+// WaitOnStorageCluster waits for storage cluster to come online
+func (t *DeployManager) WaitOnStorageCluster() error {
 	timeout := 1200 * time.Second
 	// NOTE the long timeout above. It can take quite a bit of time for this
 	// storage cluster to fully initialize
